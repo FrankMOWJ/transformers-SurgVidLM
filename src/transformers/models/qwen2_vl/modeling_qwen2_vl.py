@@ -1427,6 +1427,7 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.rope_deltas = None  # cache rope_deltas here
 
+        self.scale = 1.0 / torch.sqrt(torch.tensor(config.hidden_size, dtype=torch.bfloat16))
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1617,6 +1618,9 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         video_grid_thw: Optional[torch.LongTensor] = None,
         rope_deltas: Optional[torch.LongTensor] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        # SurgVidLM
+        pixel_values_clips: Optional[torch.FloatTensor] = None,
+        clip_grid_thw: Optional[torch.LongTensor] = None
     ) -> Union[Tuple, Qwen2VLCausalLMOutputWithPast]:
         r"""
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1686,6 +1690,16 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             if pixel_values_videos is not None:
                 pixel_values_videos = pixel_values_videos.type(self.visual.get_dtype())
                 video_embeds = self.visual(pixel_values_videos, grid_thw=video_grid_thw)
+                # SurgVidLM
+                if pixel_values_clips is not None:
+                    pixel_values_clips = pixel_values_clips.type(self.visual.get_dtype())
+                    clip_embeds = self.visual(pixel_values_clips, grid_thw=clip_grid_thw) 
+                    # conduct mix attention
+                    score = F.softmax((video_embeds @ clip_embeds.T) * self.scale, dim=-1)
+                    attn = score @ clip_embeds
+                    assert attn.shape == video_embeds.shape, f'Mixed feature shape {attn.shape} is different from video embeds shape {video_embeds.shape}.'
+                    video_embeds = attn
+                    
                 n_video_tokens = (input_ids == self.config.video_token_id).sum().item()
                 n_video_features = video_embeds.shape[0]
                 if n_video_tokens != n_video_features:
@@ -1785,6 +1799,9 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
         pixel_values_videos=None,
         image_grid_thw=None,
         video_grid_thw=None,
+        # SurgVidLM
+        pixel_values_clips=None,
+        clip_grid_thw=None,
         **kwargs,
     ):
         # Overwritten -- in specific circumstances we don't want to forward image inputs to the model
@@ -1798,8 +1815,10 @@ class Qwen2VLForConditionalGeneration(Qwen2VLPreTrainedModel, GenerationMixin):
             position_ids=position_ids,
             pixel_values=pixel_values,
             pixel_values_videos=pixel_values_videos,
+            pixel_values_clips=pixel_values_clips,
             image_grid_thw=image_grid_thw,
             video_grid_thw=video_grid_thw,
+            clip_grid_thw=clip_grid_thw,
             use_cache=use_cache,
             **kwargs,
         )

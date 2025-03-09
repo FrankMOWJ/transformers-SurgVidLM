@@ -276,6 +276,7 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
         self,
         images: ImageInput,
         videos: VideoInput = None,
+        clips: VideoInput = None,
         do_resize: bool = None,
         size: Dict[str, int] = None,
         resample: PILImageResampling = None,
@@ -352,6 +353,8 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
             images = make_flat_list_of_images(images)
         if videos is not None:
             videos = make_batched_videos(videos)
+        if clips is not None:
+            clips = make_batched_videos(clips)
 
         if images is not None and not valid_images(images):
             raise ValueError(
@@ -412,6 +415,31 @@ class Qwen2VLImageProcessor(BaseImageProcessor):
             pixel_values = np.array(pixel_values)
             vision_grid_thws = np.array(vision_grid_thws)
             data = {"pixel_values_videos": pixel_values, "video_grid_thw": vision_grid_thws}
+            
+            # SurgVideLM
+            if clips is not None:
+                clips_pixel_values, clips_vision_grid_thws = [], []
+                for images in clips:
+                    patches, video_grid_thw = self._preprocess(
+                        images,
+                        do_resize=do_resize,
+                        resample=resample,
+                        do_rescale=do_rescale,
+                        rescale_factor=rescale_factor,
+                        do_normalize=do_normalize,
+                        image_mean=image_mean,
+                        image_std=image_std,
+                        data_format=data_format,
+                        do_convert_rgb=do_convert_rgb,
+                        input_data_format=input_data_format,
+                    )
+                    clips_pixel_values.extend(patches)
+                    clips_vision_grid_thws.append(video_grid_thw)
+                clips_pixel_values = np.array(clips_pixel_values)
+                clips_vision_grid_thws = np.array(clips_vision_grid_thws)
+                
+                data["pixel_values_clips"] = clips_pixel_values
+                data["clip_grid_thw"] = clips_vision_grid_thws
 
         return BatchFeature(data=data, tensor_type=return_tensors)
 
